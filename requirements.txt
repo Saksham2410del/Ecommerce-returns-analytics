@@ -1,4 +1,3 @@
-pandas==2.2.2
-pymongo==4.7.0
-matplotlib==3.9.0
-jupyter==1.0.0
+pandas
+matplotlib
+jupyter
