@@ -5,70 +5,74 @@
 //      Google Sheet tab named "Return Analytics".
 //   2. Open Extensions > Apps Script, paste this file, and run setupDailyTrigger() once.
 //
-// The email numbers are read from the sheet, so they update whenever the sheet does.
+// Sheet columns (same order as return_summary.csv):
+//   0 product_category | 1 total_purchases | 2 total_returns | 3 total_refund_inr
+//   4 return_rate_pct  | 5 share_of_returns_pct | 6 share_of_refunds_pct
 
-const RECIPIENT_EMAILS = "marketing@ecommerce.com, product@ecommerce.com";
-const ALERT_RETURN_RATE = 15; // categories above this return rate (%) get flagged
+var RECIPIENT_EMAILS = "marketing@ecommerce.com, product@ecommerce.com";
+var ALERT_RETURN_RATE = 15;   // flag any category with a return rate above 15%
 
 function sendReturnSummary() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Return Analytics");
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return;
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Return Analytics");
+  var data = sheet.getDataRange().getValues();
 
-  // Find columns by header name so the column order in the sheet doesn't matter
-  const header = data[0];
-  const col = name => header.indexOf(name);
-  const rows = data.slice(1);
+  var table = "<table border='1' cellpadding='6' style='border-collapse: collapse;'>";
+  table += "<tr><th>Category</th><th>Purchases</th><th>Returns</th><th>Return Rate</th><th>Refunds (Rs.)</th></tr>";
 
-  let emailHtml = "<h2>Daily Return Rate Summary</h2>";
-  emailHtml += "<table border='1' cellpadding='6' style='border-collapse: collapse; font-family: Arial, sans-serif;'>";
-  emailHtml += "<tr style='background-color: #f2f2f2;'><th>Category</th><th>Purchases</th><th>Returns</th>"
-             + "<th>Return Rate</th><th>Refunds (Rs.)</th><th>Share of Refunds</th></tr>";
+  var alerts = "";
+  var flaggedCategories = [];
 
-  const flagged = [];
-  rows.forEach(row => {
-    const category = row[col("product_category")];
-    const rate = Number(row[col("return_rate_pct")]);
-    const isHigh = rate > ALERT_RETURN_RATE;
-    if (isHigh) flagged.push(row);
+  // row 0 is the header, so start from 1
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var category = row[0];
+    var returnRate = Number(row[4]);
 
-    emailHtml += `<tr style="background-color: ${isHigh ? "#ffebee" : "#ffffff"};">`
-               + `<td>${category}</td>`
-               + `<td>${row[col("total_purchases")]}</td>`
-               + `<td>${row[col("total_returns")]}</td>`
-               + `<td>${rate.toFixed(1)}%</td>`
-               + `<td>${Number(row[col("total_refund_inr")]).toLocaleString("en-IN")}</td>`
-               + `<td>${Number(row[col("share_of_refunds_pct")]).toFixed(1)}%</td>`
-               + "</tr>";
-  });
-  emailHtml += "</table><br/>";
+    var color = "#ffffff";
+    if (returnRate > ALERT_RETURN_RATE) {
+      color = "#ffebee";
+      flaggedCategories.push(category);
+      alerts += "<p><b>" + category + "</b> has a " + returnRate.toFixed(1) + "% return rate. "
+              + "It makes up " + Math.round(row[5]) + "% of all returns and "
+              + Math.round(row[6]) + "% of all refunds.</p>";
+    }
 
-  let subject = "Daily Return Summary: all categories normal";
+    table += "<tr style='background-color: " + color + ";'>"
+           + "<td>" + category + "</td>"
+           + "<td>" + row[1] + "</td>"
+           + "<td>" + row[2] + "</td>"
+           + "<td>" + returnRate.toFixed(1) + "%</td>"
+           + "<td>" + Math.round(row[3]) + "</td>"
+           + "</tr>";
+  }
+  table += "</table>";
 
-  if (flagged.length > 0) {
-    const names = flagged.map(row => row[col("product_category")]).join(", ");
-    subject = `Return Alert: high return rate in ${names}`;
+  var subject = "Daily Return Summary: all categories normal";
+  var body = "<h2>Daily Return Rate Summary</h2>" + table;
 
-    flagged.forEach(row => {
-      emailHtml += `<p><strong>${row[col("product_category")]}</strong> has a `
-                 + `${Number(row[col("return_rate_pct")]).toFixed(1)}% return rate and makes up `
-                 + `${Number(row[col("share_of_returns_pct")]).toFixed(0)}% of all returns and `
-                 + `${Number(row[col("share_of_refunds_pct")]).toFixed(0)}% of all refunds.</p>`;
-    });
-    emailHtml += "<p style='color: #c0392b;'><strong>Suggested action:</strong> review paid ads "
-               + "for these categories and check product size guides.</p>";
+  if (flaggedCategories.length > 0) {
+    subject = "Return Alert: high return rate in " + flaggedCategories.join(", ");
+    body += alerts;
+    body += "<p style='color: #c0392b;'><b>Suggested action:</b> review paid ads for these "
+          + "categories and check the product size guides.</p>";
   }
 
-  MailApp.sendEmail({ to: RECIPIENT_EMAILS, subject: subject, htmlBody: emailHtml });
+  MailApp.sendEmail({
+    to: RECIPIENT_EMAILS,
+    subject: subject,
+    htmlBody: body
+  });
 }
 
+// Run this once to send the email every day at 9 AM
 function setupDailyTrigger() {
-  // Remove any old trigger first so the email isn't sent twice
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === "sendReturnSummary") {
-      ScriptApp.deleteTrigger(t);
+  // delete the old trigger first so the email isn't sent twice
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() == "sendReturnSummary") {
+      ScriptApp.deleteTrigger(triggers[i]);
     }
-  });
+  }
 
   ScriptApp.newTrigger("sendReturnSummary")
     .timeBased()

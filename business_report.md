@@ -16,7 +16,7 @@ We analyzed a simulated dataset of **10,900+ raw JSON transaction records**, cov
 
 ## 2. Category Performance & Financial Impact
 
-Using SQL queries with Common Table Expressions (CTEs), we analyzed return rates and refund liabilities across all four product categories:
+Using SQL queries on the SQLite database, we analyzed return rates and refund liabilities across all four product categories:
 
 | Product Category | Purchases | Returns | Return Rate (%) | Total Refunds (INR) | Share of Total Refunds | Return Reasons |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |

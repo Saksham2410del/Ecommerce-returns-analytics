@@ -47,7 +47,7 @@ In this store's data the overall return rate is about 11%, which looks fine at f
 flowchart LR
     A[(raw_users.json<br/>raw_events.json<br/>10,905 records)] --> B[etl_pipeline.py<br/>flatten JSON, fix types,<br/>fill gaps, sanity checks]
     B --> C[(SQLite<br/>customers: 2,000<br/>transactions: 8,905)]
-    C --> D[sql_analytics.sql<br/>return rates, refunds,<br/>reasons, serial returners]
+    C --> D[sql_analytics.sql<br/>return rates, refunds,<br/>reasons, top returners]
     C --> E[data_analysis.ipynb<br/>charts]
     C --> F[cost_analysis.py<br/>savings scenarios]
     C --> G[return_summary.py<br/>summary CSV + chart]
@@ -66,10 +66,10 @@ flowchart LR
 It then loads two tables into SQLite.
 
 **2. SQL analysis (`sql_analytics.sql`).** Four queries:
-- category return rates, using CTEs to count purchases and returns separately and then join them
+- return rate by category, counting purchases and returns with `SUM(CASE WHEN ...)`
 - refund totals and each category's share of all refunds
-- the top 10 repeat returners, ranked with `RANK()`
-- the mix of return reasons within each category, using a window function
+- return reasons in each category, which is where the size issue shows up
+- the top 10 customers by items returned
 
 **3. Charts and savings.** The notebook (`data_analysis.ipynb`) runs the queries and plots the return-rate chart. `cost_analysis.py` models the savings scenarios above.
 
@@ -109,7 +109,7 @@ It then loads two tables into SQLite.
 ├── images/
 │   └── return_rate_by_category.png
 ├── etl_pipeline.py           # JSON -> cleaned tables -> SQLite
-├── sql_analytics.sql         # return rate, refund, reason and returner queries
+├── sql_analytics.sql         # return rate, refund, reason and top returner queries
 ├── data_analysis.ipynb       # analysis notebook with charts
 ├── cost_analysis.py          # savings scenarios
 ├── return_summary.py         # summary CSV for the Google Sheet + chart

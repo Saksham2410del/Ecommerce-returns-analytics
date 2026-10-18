@@ -1,60 +1,62 @@
+# How much money would we save if fewer Apparel items were returned?
+#
+# Cost of a return = refund + Rs. 200 for return shipping and handling (assumed)
+#
+# Usage: python cost_analysis.py   (run etl_pipeline.py first)
+
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 
+HANDLING_COST = 200
+TARGET_RATES = [0.20, 0.10, 0.05]   # 5% is what the other categories already have
+
+
 def calculate_savings():
     conn = sqlite3.connect('ecommerce_data_warehouse.db')
-    df = pd.read_sql_query("SELECT * FROM transactions", conn)
+    df = pd.read_sql_query("SELECT * FROM transactions WHERE product_category = 'Apparel'", conn)
     conn.close()
 
-    apparel_orders = df[(df['product_category'] == 'Apparel') & (df['event_type'] == 'purchase')]
-    apparel_returns = df[(df['product_category'] == 'Apparel') & (df['event_type'] == 'return')]
+    orders = len(df[df['event_type'] == 'purchase'])
+    returns = df[df['event_type'] == 'return']
 
-    total_orders = len(apparel_orders)
-    total_returns = len(apparel_returns)
-    current_return_rate = total_returns / total_orders
-    total_refunds = apparel_returns['refund_amount'].sum()
-    avg_refund = total_refunds / total_returns
+    avg_refund = returns['refund_amount'].mean()
+    current_cost = returns['refund_amount'].sum() + len(returns) * HANDLING_COST
 
-    shipping_cost = 200.0
-    current_loss = total_refunds + (total_returns * shipping_cost)
+    print("Apparel orders: ", orders)
+    print("Apparel returns:", len(returns), f"({len(returns) / orders:.1%})")
+    print(f"Current cost of returns: Rs. {current_cost / 100000:.2f} lakh\n")
 
-    targets = [
-        {"label": "20% Return Rate", "rate": 0.20},
-        {"label": "10% Return Rate", "rate": 0.10},
-        {"label": "5% Return Rate (Baseline)", "rate": 0.05}
-    ]
+    results = []
+    for rate in TARGET_RATES:
+        new_returns = int(orders * rate)
+        new_cost = new_returns * (avg_refund + HANDLING_COST)
+        savings = current_cost - new_cost
 
-    savings_list = []
-    for t in targets:
-        proj_returns = int(total_orders * t['rate'])
-        proj_loss = (proj_returns * avg_refund) + (proj_returns * shipping_cost)
-        savings = current_loss - proj_loss
-        savings_lakhs = savings / 100000
-
-        savings_list.append({
-            "Target": t['label'],
-            "Projected Returns": proj_returns,
-            "Total Loss (Rs)": round(proj_loss, 2),
-            "Savings (Lakhs)": round(savings_lakhs, 2)
+        results.append({
+            'Target': f"{rate:.0%} return rate",
+            'Projected Returns': new_returns,
+            'Cost (Lakhs)': round(new_cost / 100000, 2),
+            'Savings (Lakhs)': round(savings / 100000, 2),
         })
 
-    savings_df = pd.DataFrame(savings_list)
+    results = pd.DataFrame(results)
+    print(results.to_string(index=False))
 
+    # bar chart of the savings
     plt.figure(figsize=(7, 4.5))
-    bars = plt.bar(savings_df['Target'], savings_df['Savings (Lakhs)'], color='#2b5c8f', width=0.45)
-    plt.title("Estimated Cost Savings from Reducing Apparel Returns", fontsize=11)
-    plt.ylabel("Savings in Lakhs (INR)", fontsize=10)
+    plt.bar(results['Target'], results['Savings (Lakhs)'], color='#2b5c8f', width=0.45)
+    for i, value in enumerate(results['Savings (Lakhs)']):
+        plt.text(i, value + 0.4, f"Rs. {value:.1f}L", ha='center', fontsize=9)
+    plt.title("Savings from Reducing Apparel Returns")
+    plt.ylabel("Savings (Rs. lakh)")
     plt.ylim(0, 18)
-
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2., height + 0.4, f"Rs. {height:.1f}L", ha='center', fontsize=9, fontweight='bold')
-
     plt.tight_layout()
     plt.savefig('projected_savings.png')
     plt.close()
-    return savings_df
+
+    return results
+
 
 if __name__ == '__main__':
     calculate_savings()

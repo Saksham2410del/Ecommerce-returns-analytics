@@ -1,8 +1,8 @@
-# Builds the category-wise return summary.
+# Makes the category summary used for reporting:
 #
 # - return_summary.csv  -> imported into the "Return Analytics" Google Sheet,
 #                          which automation.gs reads to send the daily email
-# - images/return_rate_by_category.png -> bar chart used in the README
+# - images/return_rate_by_category.png -> bar chart shown in the README
 #
 # Usage: python return_summary.py   (run etl_pipeline.py first)
 
@@ -11,38 +11,44 @@ import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 
-QUERY = '''
-SELECT
-    product_category,
-    SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) AS total_purchases,
-    SUM(CASE WHEN event_type = 'return' THEN 1 ELSE 0 END) AS total_returns,
-    ROUND(SUM(refund_amount), 2) AS total_refund_inr
-FROM transactions
-GROUP BY product_category
-'''
-
 
 def build_summary():
     conn = sqlite3.connect('ecommerce_data_warehouse.db')
-    df = pd.read_sql_query(QUERY, conn)
+    df = pd.read_sql_query("SELECT * FROM transactions", conn)
     conn.close()
 
-    df['return_rate_pct'] = (df['total_returns'] / df['total_purchases'] * 100).round(2)
-    df['share_of_returns_pct'] = (df['total_returns'] / df['total_returns'].sum() * 100).round(2)
-    df['share_of_refunds_pct'] = (df['total_refund_inr'] / df['total_refund_inr'].sum() * 100).round(2)
-    return df.sort_values('return_rate_pct', ascending=False)
+    purchases = df[df['event_type'] == 'purchase']
+    returns = df[df['event_type'] == 'return']
+
+    summary = pd.DataFrame({
+        'total_purchases': purchases.groupby('product_category').size(),
+        'total_returns': returns.groupby('product_category').size(),
+        'total_refund_inr': returns.groupby('product_category')['refund_amount'].sum().round(2),
+    })
+
+    summary['return_rate_pct'] = (summary['total_returns'] / summary['total_purchases'] * 100).round(2)
+    summary['share_of_returns_pct'] = (summary['total_returns'] / len(returns) * 100).round(2)
+    summary['share_of_refunds_pct'] = (summary['total_refund_inr'] / returns['refund_amount'].sum() * 100).round(2)
+
+    summary = summary.sort_values('return_rate_pct', ascending=False)
+    return summary.reset_index()
 
 
-def plot_return_rates(df):
-    colors = ['#c0392b' if cat == 'Apparel' else '#2980b9' for cat in df['product_category']]
+def plot_return_rates(summary):
+    # Apparel in red, everything else in blue
+    colors = []
+    for category in summary['product_category']:
+        if category == 'Apparel':
+            colors.append('#c0392b')
+        else:
+            colors.append('#2980b9')
 
     plt.figure(figsize=(7, 4.5))
-    bars = plt.bar(df['product_category'], df['return_rate_pct'], color=colors, width=0.5)
-    plt.axhline(y=5.0, color='green', linestyle='--', linewidth=1.2, label='Normal baseline (~5%)')
+    plt.bar(summary['product_category'], summary['return_rate_pct'], color=colors, width=0.5)
+    plt.axhline(y=5, color='green', linestyle='--', label='Normal baseline (~5%)')
 
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2, height + 0.7, f"{height:.1f}%", ha='center', fontsize=9)
+    for i, rate in enumerate(summary['return_rate_pct']):
+        plt.text(i, rate + 0.7, f"{rate:.1f}%", ha='center', fontsize=9)
 
     plt.title('Return Rate by Product Category')
     plt.ylabel('Return Rate (%)')
