@@ -134,7 +134,7 @@ def load_data(customers, transactions):
     print("\nSaved to ecommerce_data_warehouse.db and cleaned_*.csv")
 
 
-if __name__ == '__main__':
+def main():
     with open('raw_data/raw_users.json') as f:
         raw_users = json.load(f)
     with open('raw_data/raw_events.json') as f:
@@ -143,3 +143,7 @@ if __name__ == '__main__':
     customers = clean_customers(raw_users)
     transactions = clean_transactions(raw_events, customers)
     load_data(customers, transactions)
+
+
+if __name__ == '__main__':
+    main()

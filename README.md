@@ -1,8 +1,8 @@
 # E-Commerce Returns Analytics - Data Pipeline & Return Analysis
 
-A data analytics project that finds where an online store is losing money to product returns. A Python pipeline cleans 11,000+ messy raw JSON records into a SQLite database. SQL queries break down return rates and refunds by category, and a Google Apps Script emails a daily summary to the marketing and product teams.
+A data analytics project that finds where an online store is losing money to product returns. A Python pipeline cleans 11,000+ messy raw JSON records into a SQLite database. SQL queries break down return rates and refunds by category, a Google Apps Script emails a daily summary to the marketing and product teams, and an "Ask your data" assistant lets anyone ask questions in plain English.
 
-**Stack:** Python, Pandas, SQL, SQLite, Matplotlib, Google Apps Script
+**Stack:** Python, Pandas, SQL, SQLite, Matplotlib, Google Apps Script, Gemini API, Streamlit
 
 > The dataset is simulated. It's built to look like the event logs of an Indian e-commerce store, including the data quality problems real logs have.
 
@@ -27,6 +27,7 @@ Before any of that, the raw data had to be cleaned, because the logs couldn't be
 3. **Analysed it with SQL**: return rate by category, refund totals, return reasons and top returners.
 4. **Estimated the savings** from bringing Apparel returns down.
 5. **Automated the reporting** with a daily email that flags any category with a high return rate.
+6. **Built an "Ask your data" assistant**, so managers can ask questions like "how much was refunded for Apparel?" without waiting for an analyst to write SQL.
 
 ## Data Cleaning
 
@@ -76,6 +77,20 @@ After cleaning: **2,000 customers and 8,905 transactions** (8,000 purchases and 
 | 10% | 189 | Rs. 5.61 L | Rs. 12.2 L |
 | 5% (other categories) | 94 | Rs. 2.79 L | Rs. 15.0 L |
 
+## "Ask Your Data" Assistant
+
+Most questions a manager has are one SQL query away, but they still have to ask an analyst and wait. The assistant answers those directly:
+
+1. You type a question, for example *"Which city has the most customers?"*
+2. Gemini gets the question plus a description of the tables, and writes a SQLite query.
+3. The query is checked: only a single `SELECT` is allowed, with nothing like `DELETE`, `DROP` or `UPDATE`.
+4. It runs on the database, which is opened **read-only** as a second safety layer.
+5. You see the answer **and the SQL that produced it**, so the result can always be checked.
+
+**Only the table structure and the question are sent to Gemini.** The query runs locally, so the customer data itself never leaves the machine.
+
+**How accurate is it?** `check_assistant.py` asks 15 test questions, each paired with a SQL query I wrote by hand, and counts how often the assistant's answer matches. The questions cover counts, return rates, refund totals and shares, the most common reasons, cities, payment methods and dates.
+
 ## Architecture
 
 ```mermaid
@@ -87,6 +102,9 @@ flowchart LR
     C --> F[cost_analysis.py<br/>savings scenarios]
     C --> G[return_summary.py<br/>summary CSV + chart]
     G --> H[Google Sheet] --> I[automation.gs<br/>daily email to<br/>marketing + product]
+    J[Manager's question] --> K[ask_data.py<br/>Gemini writes SQL]
+    K -- SELECT-only check --> C
+    C -- answer + SQL --> L[app.py<br/>Streamlit page]
 ```
 
 ## How It Works
@@ -102,6 +120,8 @@ flowchart LR
 **3. Savings (`cost_analysis.py`).** Works out the savings scenarios above.
 
 **4. Automated reporting.** `return_summary.py` writes `return_summary.csv` and the return-rate chart. The CSV is imported into a Google Sheet. `automation.gs` reads that sheet every morning at 9 AM and emails the table to the marketing and product teams. Any category with a return rate above 15% is highlighted and named in the subject line.
+
+**5. Assistant (`ask_data.py`, `app.py`).** `ask_data.py` holds the prompt, the safety check and the read-only query runner. `app.py` is the Streamlit page on top of it, and `check_assistant.py` measures its accuracy.
 
 ## Database Schema
 
@@ -141,6 +161,9 @@ flowchart LR
 ├── cost_analysis.py          # savings scenarios
 ├── return_summary.py         # summary CSV for the Google Sheet + chart
 ├── automation.gs             # daily email (Google Apps Script)
+├── ask_data.py               # question -> Gemini -> SQL -> answer
+├── app.py                    # Streamlit page for the assistant
+├── check_assistant.py        # accuracy check on 15 test questions
 ├── business_report.md        # findings written up for the business teams
 └── requirements.txt
 ```
@@ -165,8 +188,21 @@ sqlite3 ecommerce_data_warehouse.db < sql_analytics.sql
 
 For the email: import `return_summary.csv` into a Google Sheet tab named `Return Analytics`, paste `automation.gs` into Extensions > Apps Script, and run `setupDailyTrigger()` once.
 
+For the assistant, get a free API key from [Google AI Studio](https://aistudio.google.com) and put it in a `.env` file in the project folder (this file is git-ignored):
+
+```
+GEMINI_API_KEY=your_key_here
+```
+
+```bash
+streamlit run app.py          # web page
+python ask_data.py            # or ask from the terminal
+python check_assistant.py     # accuracy on the 15 test questions
+```
+
 ## Limitations
 
 - The data is simulated, so the patterns are cleaner than real data would be. For example, it's unusual for 100% of a category's returns to share one reason.
 - Returns aren't linked to a specific order ID, so return rates are calculated per category (returns ÷ purchases), not per order.
 - There's no ad spend data, so the marketing recommendation is to review ads on high-return products, not a measured ROI figure.
+- The assistant can misread vague questions ("how are we doing?"). That's why it always shows the SQL it used, so the answer can be checked rather than trusted blindly.

@@ -7,3 +7,6 @@ venv/
 cleaned_*.csv
 .DS_Store
 return_summary.csv
+
+# API key stays on your machine
+.env
