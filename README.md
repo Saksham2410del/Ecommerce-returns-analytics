@@ -1,186 +1,146 @@
-# E-Commerce Returns Analytics: Data Pipeline & Cost Analysis (Simulated Dataset)
+# E-Commerce Returns Analytics - Data Pipeline & Return Analysis
 
-A data analytics project that identifies and diagnoses profit leaks caused by high product return rates. Processing a simulated dataset of 10,900+ raw JSON transaction logs into a SQLite database, it runs SQL queries to uncover return patterns across categories, models financial savings from reducing size-related returns, and automates reporting to marketing and product teams.
+A data analytics project that finds where an online store is losing money to product returns. A Python pipeline cleans 10,900+ raw JSON records into a SQLite database, SQL queries break down return rates and refunds by category, and a Google Apps Script emails a daily summary to the marketing and product teams.
 
----
+**Stack:** Python, Pandas, SQL, SQLite, Matplotlib, Jupyter, Google Apps Script
+
+> The dataset is simulated, built to look like the event logs of an Indian e-commerce store.
+
+![Return rate by category](images/return_rate_by_category.png)
 
 ## Problem Statement
 
-In e-commerce, product returns directly hurt profitability. Beyond the lost order value, every return incurs reverse logistics expenses (return shipping labels, inspection, warehouse restocking) and leads to inventory depreciation.
+Returns hurt an e-commerce business twice. The refund wipes out the sale, and the store also pays for return shipping, inspection and restocking.
 
-Across our simulated platform dataset of 2,000 customers and 8,000+ orders, the overall platform return rate appeared manageable at ~11%. However, an aggregate view concealed a major profit leak:
+In this store's data the overall return rate is about 11%, which looks fine at first. The question was whether that average was hiding a problem in a specific category, and if so, what was causing it and what fixing it would be worth.
 
-1. **Category Discrepancy:** While Electronics, Home, and Beauty maintained a healthy baseline return rate of ~5%, **Apparel suffered an abnormal return rate of 31.7%**.
-2. **Financial Drain:** Apparel alone accounted for **66% of all returned items** and was responsible for **Rs. 16.6 Lakh out of Rs. 24.9 Lakh in total refunds**.
-3. **Root Cause:** Analysis of return reasons showed that **100% of Apparel returns were caused by "Size Issues"**, whereas other categories returned items due to defects or changed minds.
-4. **Marketing Inefficiency:** Marketing was actively spending ad budget acquiring customers for Apparel items that had a near one-in-three chance of being returned, resulting in negative Return on Ad Spend (ROAS).
+## Key Findings
 
-**Objective:** Build an automated data pipeline to clean and store transaction logs, run SQL analytics to quantify category return rates and rank serial returners, model financial savings from improving sizing guides, and automate alerts so marketing can immediately pause ad spend on high-return products.
+| Category | Purchases | Returns | Return Rate | Total Refunds | Share of Refunds | Return Reasons |
+|---|---|---|---|---|---|---|
+| **Apparel** | 1,898 | 601 | **31.7%** | **Rs. 16.63 L** | **66.7%** | 100% Size Issue |
+| Electronics | 2,053 | 105 | 5.1% | Rs. 2.84 L | 11.4% | Defective 53%, Changed Mind 47% |
+| Home | 1,989 | 100 | 5.0% | Rs. 2.85 L | 11.4% | Defective 52%, Changed Mind 48% |
+| Beauty | 2,060 | 99 | 4.8% | Rs. 2.63 L | 10.5% | Changed Mind 52%, Defective 48% |
+| **Total** | **8,000** | **905** | **11.3%** | **Rs. 24.94 L** | 100% | |
 
----
+1. **Apparel returns at 31.7%**, more than 6x the ~5% seen in every other category.
+2. **Apparel causes 66% of all returns** (601 of 905) and **Rs. 16.6 lakh of the Rs. 24.9 lakh** in total refunds.
+3. **Every Apparel return is a "Size Issue".** The other categories have a normal mix of defects and changed minds. So the problem isn't product quality. Customers can't tell which size to buy.
 
-## Project Architecture
+**Recommendation:** fix the Apparel size guides first (clear measurements, fit notes, a size recommender), and have marketing review paid ads on high-return Apparel products until the return rate comes down.
+
+## What Fixing Sizing Is Worth
+
+`cost_analysis.py` estimates the savings if the Apparel return rate drops, counting both the refund and an assumed Rs. 200 reverse-logistics cost per return:
+
+| Apparel return rate | Returns | Refunds + handling | Savings |
+|---|---|---|---|
+| 31.7% (today) | 601 | Rs. 17.84 L | - |
+| 20% | 379 | Rs. 11.25 L | Rs. 6.6 L |
+| 10% | 189 | Rs. 5.61 L | Rs. 12.2 L |
+| 5% (other categories) | 94 | Rs. 2.79 L | Rs. 15.0 L |
+
+## Architecture
 
 ```mermaid
-flowchart TD
-    subgraph Data Source
-        A["Raw JSON Files (10,900+ records)<br/>• raw_users.json<br/>• raw_events.json"]
-    end
-
-    subgraph Data Pipeline
-        A --> B["Python & Pandas ETL (etl_pipeline.py)<br/>• Flatten nested profiles and payloads<br/>• Standardize dates and clean nulls"]
-        B --> C["SQLite Database (ecommerce_data_warehouse.db)<br/>• customers (2,000 rows)<br/>• transactions (8,905 rows)"]
-    end
-
-    subgraph Analytics & Modeling
-        C --> D["SQL Analytics (sql_analytics.sql)<br/>• CTEs for category return rates<br/>• Window Functions for serial returners"]
-        D --> E["Jupyter Notebook (data_analysis.ipynb)<br/>• Return rate comparison charts<br/>• Refund distribution"]
-        D --> F["Cost Analysis (cost_analysis.py)<br/>• Savings from reducing apparel returns"]
-    end
-
-    subgraph Automated Reporting
-        D --> G["Google Apps Script (automation.gs)<br/>• Daily return summary email to marketing and product teams"]
-    end
+flowchart LR
+    A[(raw_users.json<br/>raw_events.json<br/>10,905 records)] --> B[etl_pipeline.py<br/>flatten JSON, fix types,<br/>fill gaps, sanity checks]
+    B --> C[(SQLite<br/>customers: 2,000<br/>transactions: 8,905)]
+    C --> D[sql_analytics.sql<br/>return rates, refunds,<br/>reasons, serial returners]
+    C --> E[data_analysis.ipynb<br/>charts]
+    C --> F[cost_analysis.py<br/>savings scenarios]
+    C --> G[return_summary.py<br/>summary CSV + chart]
+    G --> H[Google Sheet] --> I[automation.gs<br/>daily email to<br/>marketing + product]
 ```
 
----
+## How It Works
+
+**1. ETL (`etl_pipeline.py`).** The raw logs are nested JSON. A customer's location and signup date sit inside a `profile` object, and each event keeps its details inside a `payload` object. The payload has different keys for purchases (`amount`, `payment_method`) and returns (`refund_amount`, `reason`). The pipeline:
+- flattens both files with `pd.json_normalize`
+- renames columns and converts timestamps to datetimes
+- removes duplicate IDs
+- fills the fields that don't apply to an event type (for example, a purchase has no refund)
+- checks for transactions with unknown customers and for negative amounts
+
+It then loads two tables into SQLite.
+
+**2. SQL analysis (`sql_analytics.sql`).** Four queries:
+- category return rates, using CTEs to count purchases and returns separately and then join them
+- refund totals and each category's share of all refunds
+- the top 10 repeat returners, ranked with `RANK()`
+- the mix of return reasons within each category, using a window function
+
+**3. Charts and savings.** The notebook (`data_analysis.ipynb`) runs the queries and plots the return-rate chart. `cost_analysis.py` models the savings scenarios above.
+
+**4. Automated reporting.** `return_summary.py` writes `return_summary.csv`, which is imported into a Google Sheet. `automation.gs` reads that sheet every morning at 9 AM and emails the table to the marketing and product teams. Any category with a return rate above 15% is highlighted and named in the subject line. The numbers come from the sheet, so the email is always current.
 
 ## Database Schema
 
-The cleaned data is stored in a SQLite relational database (`ecommerce_data_warehouse.db`) across two tables:
+**customers** (2,000 rows)
 
-### 1. `customers` Table (2,000 records)
 | Column | Type | Description |
-| :--- | :--- | :--- |
-| `customer_id` | TEXT (PK) | Unique customer identifier (`U00001` - `U02000`) |
-| `location` | TEXT | Customer city (Mumbai, Delhi, Bangalore, Hyderabad, Pune) |
-| `signup_date` | DATETIME | Customer registration timestamp |
-| `status` | TEXT | Account status (`active`) |
+|---|---|---|
+| `customer_id` | TEXT | `U00001` to `U02000` |
+| `location` | TEXT | Mumbai, Delhi, Bangalore, Hyderabad, Pune |
+| `signup_date` | DATETIME | Registration date |
+| `status` | TEXT | Account status |
 
-### 2. `transactions` Table (8,905 records)
+**transactions** (8,905 rows: 8,000 purchases, 905 returns)
+
 | Column | Type | Description |
-| :--- | :--- | :--- |
-| `transaction_id` | TEXT (PK) | Unique transaction ID (`EV000001` - `EV008905`) |
-| `event_type` | TEXT | Event type (`purchase` or `return`) |
-| `timestamp` | DATETIME | Transaction timestamp |
-| `customer_id` | TEXT (FK) | References `customers.customer_id` |
+|---|---|---|
+| `transaction_id` | TEXT | `EV000001` to `EV008905` |
+| `event_type` | TEXT | `purchase` or `return` |
+| `timestamp` | DATETIME | Event date |
+| `customer_id` | TEXT | Links to `customers` |
 | `product_category` | TEXT | Apparel, Electronics, Home, Beauty |
-| `amount` | REAL | Purchase amount in INR |
+| `amount` | REAL | Purchase amount in INR (0 for returns) |
 | `payment_method` | TEXT | UPI, Credit Card, Debit Card |
-| `refund_amount` | REAL | Refund amount issued (for return events) |
-| `reason` | TEXT | Return reason (Size Issue, Changed Mind, Defective) |
+| `refund_amount` | REAL | Refund in INR (0 for purchases) |
+| `reason` | TEXT | Size Issue, Defective, Changed Mind |
 
----
+## Project Structure
 
-## Key Findings & SQL Analysis
-
-### Category Return Rates & Refund Breakdown
-```sql
-WITH category_purchases AS (
-    SELECT product_category, COUNT(*) AS total_purchases
-    FROM transactions WHERE event_type = 'purchase' GROUP BY product_category
-),
-category_returns AS (
-    SELECT product_category, COUNT(*) AS total_returns
-    FROM transactions WHERE event_type = 'return' GROUP BY product_category
-)
-SELECT 
-    p.product_category,
-    p.total_purchases,
-    COALESCE(r.total_returns, 0) AS total_returns,
-    ROUND(CAST(COALESCE(r.total_returns, 0) AS FLOAT) / p.total_purchases * 100, 2) AS return_rate_pct
-FROM category_purchases p
-LEFT JOIN category_returns r ON p.product_category = r.product_category
-ORDER BY return_rate_pct DESC;
 ```
-
-**Results:**
-| Product Category | Purchases | Returns | Return Rate | Total Refunds (INR) | Share of All Refunds | Return Reasons |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Apparel** | 1,898 | 601 | **31.7%** | **Rs. 16.63 Lakh** | **66.7%** | **100% Size Issue** |
-| **Electronics** | 2,053 | 105 | 5.1% | Rs. 2.84 Lakh | 11.4% | Defective (53%), Changed Mind (47%) |
-| **Home** | 1,989 | 100 | 5.0% | Rs. 2.85 Lakh | 11.4% | Defective (52%), Changed Mind (48%) |
-| **Beauty** | 2,060 | 99 | 4.8% | Rs. 2.63 Lakh | 10.5% | Changed Mind (52%), Defective (48%) |
-| **Total / Avg** | **8,000** | **905** | **11.3%** | **Rs. 24.94 Lakh** | **100.0%** | — |
-
----
-
-## Cost Savings Analysis
-
-To evaluate the financial return of fixing sizing issues (e.g., introducing updated size charts, fit guides, and size recommendation tools), we modeled projected savings across the dataset, factoring in both refund amounts and an estimated Rs. 200 reverse logistics cost per returned unit:
-
-* **Current Baseline (31.7% return rate):** Rs. 16.63 Lakh refunds + Rs. 1.20 Lakh shipping = **Rs. 17.84 Lakh total loss**.
-* **Target 1 (Drop to 20%):** Reduces returns to 379 units $\rightarrow$ **modeled savings of Rs. 6.6 Lakhs**.
-* **Target 2 (Drop to 10%):** Reduces returns to 189 units $\rightarrow$ **modeled savings of Rs. 12.2 Lakhs**.
-* **Target 3 (Drop to 5% baseline):** Reduces returns to 94 units $\rightarrow$ **modeled savings of up to Rs. 15.0 Lakhs across the dataset**.
-
----
-
-## Automated Reporting & Alerting
-
-**Google Apps Script (`automation.gs`):** Connects to the return analytics spreadsheet and sends automated email alerts directly to the Marketing and Product teams (`marketing@ecommerce.com` and `product@ecommerce.com`) with current return rates, advising marketing to pause ad spend on high-return Apparel SKUs. Running `setupDailyTrigger()` once in the Google Apps Script editor installs the daily 9:00 AM schedule trigger.
-
----
-
-## Tech Stack
-
-* **Language:** Python
-* **Data Processing & Visualization:** Pandas, Matplotlib
-* **Database & Querying:** SQLite, SQL (Common Table Expressions, Window Functions)
-* **Interactive Analysis:** Jupyter Notebook
-* **Automation:** Google Apps Script
-
----
-
-## Repository Structure
-
-```text
 ├── raw_data/
-│   ├── raw_users.json              # 2,000 raw customer records
-│   └── raw_events.json             # 8,905 raw order & return events
-├── etl_pipeline.py                 # Ingestion & cleaning script into SQLite
-├── sql_analytics.sql               # SQL queries for return rates, refunds & serial returners
-├── cost_analysis.py                # Cost savings calculations
-├── data_analysis.ipynb             # Jupyter Notebook with charts and analysis
-├── automation.gs                   # Google Apps Script for automated email alerts
-├── business_report.md              # Detailed strategy and recommendation report
-├── requirements.txt                # Python dependencies
-├── .gitignore                      # Git ignore rules
-└── README.md                       # Project documentation
+│   ├── raw_users.json        # 2,000 customer records
+│   └── raw_events.json       # 8,905 purchase and return events
+├── images/
+│   └── return_rate_by_category.png
+├── etl_pipeline.py           # JSON -> cleaned tables -> SQLite
+├── sql_analytics.sql         # return rate, refund, reason and returner queries
+├── data_analysis.ipynb       # analysis notebook with charts
+├── cost_analysis.py          # savings scenarios
+├── return_summary.py         # summary CSV for the Google Sheet + chart
+├── automation.gs             # daily email (Google Apps Script)
+├── business_report.md        # findings written up for the business teams
+└── requirements.txt
 ```
 
----
+## Running It
 
-## Setup & Execution
-
-### 1. Set Up Environment
 ```bash
-# Clone the repository
 git clone https://github.com/Saksham2410del/Ecommerce-returns-analytics.git
 cd Ecommerce-returns-analytics
-
-# Create and activate virtual environment
-python -m venv .venv
-# On Windows:
-.venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Run the ETL Pipeline
-Extracts raw JSON files, cleans nested payloads, and loads the SQLite database:
-```bash
-python etl_pipeline.py
-```
-
-### 3. Run Cost Analysis
-Calculates projected savings across return reduction targets:
-```bash
-python cost_analysis.py
-```
-
-### 4. Launch Jupyter Notebook
-```bash
+python etl_pipeline.py        # builds ecommerce_data_warehouse.db
+python return_summary.py      # summary CSV + chart
+python cost_analysis.py       # savings scenarios
 jupyter notebook data_analysis.ipynb
 ```
+
+To run the SQL queries directly:
+
+```bash
+sqlite3 ecommerce_data_warehouse.db < sql_analytics.sql
+```
+
+For the email: import `return_summary.csv` into a Google Sheet tab named `Return Analytics`, paste `automation.gs` into Extensions > Apps Script, and run `setupDailyTrigger()` once.
+
+## Limitations
+
+- The data is simulated, so the patterns are cleaner than real data would be. For example, it's unusual for 100% of a category's returns to share one reason.
+- Returns aren't linked to a specific order ID, so return rates are calculated per category (returns ÷ purchases), not per order.
+- There's no ad spend data, so the marketing recommendation is to review ads on high-return products, not a measured ROI figure.

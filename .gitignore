@@ -7,3 +7,4 @@ venv/
 cleaned_*.csv
 projected_savings.png
 .DS_Store
+return_summary.csv
