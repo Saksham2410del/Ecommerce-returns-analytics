@@ -6,7 +6,6 @@
 
 import sqlite3
 import pandas as pd
-import matplotlib.pyplot as plt
 
 HANDLING_COST = 200
 TARGET_RATES = [0.20, 0.10, 0.05]   # 5% is what the other categories already have
@@ -42,19 +41,6 @@ def calculate_savings():
 
     results = pd.DataFrame(results)
     print(results.to_string(index=False))
-
-    # bar chart of the savings
-    plt.figure(figsize=(7, 4.5))
-    plt.bar(results['Target'], results['Savings (Lakhs)'], color='#2b5c8f', width=0.45)
-    for i, value in enumerate(results['Savings (Lakhs)']):
-        plt.text(i, value + 0.4, f"Rs. {value:.1f}L", ha='center', fontsize=9)
-    plt.title("Savings from Reducing Apparel Returns")
-    plt.ylabel("Savings (Rs. lakh)")
-    plt.ylim(0, 18)
-    plt.tight_layout()
-    plt.savefig('projected_savings.png')
-    plt.close()
-
     return results
 
 

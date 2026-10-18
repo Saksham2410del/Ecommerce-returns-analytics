@@ -1,10 +1,10 @@
 # E-Commerce Returns Analytics - Data Pipeline & Return Analysis
 
-A data analytics project that finds where an online store is losing money to product returns. A Python pipeline cleans 10,900+ raw JSON records into a SQLite database, SQL queries break down return rates and refunds by category, and a Google Apps Script emails a daily summary to the marketing and product teams.
+A data analytics project that finds where an online store is losing money to product returns. A Python pipeline cleans 11,000+ messy raw JSON records into a SQLite database. SQL queries break down return rates and refunds by category, and a Google Apps Script emails a daily summary to the marketing and product teams.
 
-**Stack:** Python, Pandas, SQL, SQLite, Matplotlib, Jupyter, Google Apps Script
+**Stack:** Python, Pandas, SQL, SQLite, Matplotlib, Google Apps Script
 
-> The dataset is simulated, built to look like the event logs of an Indian e-commerce store.
+> The dataset is simulated. It's built to look like the event logs of an Indian e-commerce store, including the data quality problems real logs have.
 
 ![Return rate by category](images/return_rate_by_category.png)
 
@@ -12,7 +12,42 @@ A data analytics project that finds where an online store is losing money to pro
 
 Returns hurt an e-commerce business twice. The refund wipes out the sale, and the store also pays for return shipping, inspection and restocking.
 
-In this store's data the overall return rate is about 11%, which looks fine at first. The question was whether that average was hiding a problem in a specific category, and if so, what was causing it and what fixing it would be worth.
+The store's overall return rate is about 11%, which looks fine. The goal was to find out:
+
+1. whether that average hides a problem in a specific category
+2. what is causing it
+3. how much fixing it would be worth
+
+Before any of that, the raw data had to be cleaned, because the logs couldn't be analysed as they were.
+
+## What I Did
+
+1. **Cleaned the raw data.** I fixed duplicates, test accounts, inconsistent labels, mixed date formats, amounts stored as text, and blank values (details below).
+2. **Loaded it into SQLite** as two tables: `customers` and `transactions`.
+3. **Analysed it with SQL**: return rate by category, refund totals, return reasons and top returners.
+4. **Estimated the savings** from bringing Apparel returns down.
+5. **Automated the reporting** with a daily email that flags any category with a high return rate.
+
+## Data Cleaning
+
+The raw files have 11,167 records: 2,030 customer records and 9,137 events. Running `python etl_pipeline.py` fixes them step by step and prints what it changed:
+
+| Problem in the raw data | Example | Fix | Rows |
+|---|---|---|---|
+| Duplicate customers | same `_id` twice | keep one | 25 |
+| Test accounts | `TEST001`, status `test` | remove | 5 |
+| Missing city | `null` or `""` | set to `Unknown` | 25 |
+| Inconsistent city names | `" mumbai"`, `PUNE`, `Bengaluru` | trim, title case, `Bengaluru` -> `Bangalore` | |
+| Duplicate events | same `event_id` logged twice | keep one | 180 |
+| Events from test accounts | `user_id = TEST003` | remove | 40 |
+| Incomplete events | no product category | remove | 12 |
+| Inconsistent labels | `apparel `, `APPAREL`, `SIZE_ISSUE` | trim and title case | |
+| Amounts stored as text | `"Rs. 4,284.59"` | strip `Rs.` and commas, convert to number | 541 |
+| Negative refunds | `-2621.63` | take the absolute value | 57 |
+| Three date formats | `2024-05-13`, `2024-05-13T00:00:00`, `13/05/2024` | parse each format | |
+| Blank payment method | `null` or `""` on a purchase | set to `Unknown` | 261 |
+
+After cleaning: **2,000 customers and 8,905 transactions** (8,000 purchases and 905 returns).
 
 ## Key Findings
 
@@ -32,7 +67,7 @@ In this store's data the overall return rate is about 11%, which looks fine at f
 
 ## What Fixing Sizing Is Worth
 
-`cost_analysis.py` estimates the savings if the Apparel return rate drops, counting both the refund and an assumed Rs. 200 reverse-logistics cost per return:
+`cost_analysis.py` estimates the savings if the Apparel return rate drops. It counts both the refund and an assumed Rs. 200 reverse-logistics cost per return:
 
 | Apparel return rate | Returns | Refunds + handling | Savings |
 |---|---|---|---|
@@ -45,10 +80,10 @@ In this store's data the overall return rate is about 11%, which looks fine at f
 
 ```mermaid
 flowchart LR
-    A[(raw_users.json<br/>raw_events.json<br/>10,905 records)] --> B[etl_pipeline.py<br/>flatten JSON, fix types,<br/>fill gaps, sanity checks]
+    A[(Raw JSON logs<br/>11,167 records)] --> B[etl_pipeline.py<br/>clean + validate]
     B --> C[(SQLite<br/>customers: 2,000<br/>transactions: 8,905)]
-    C --> D[sql_analytics.sql<br/>return rates, refunds,<br/>reasons, top returners]
-    C --> E[data_analysis.ipynb<br/>charts]
+    B --> D[cleaned CSVs]
+    C --> E[sql_analytics.sql<br/>return rates, refunds,<br/>reasons, top returners]
     C --> F[cost_analysis.py<br/>savings scenarios]
     C --> G[return_summary.py<br/>summary CSV + chart]
     G --> H[Google Sheet] --> I[automation.gs<br/>daily email to<br/>marketing + product]
@@ -56,14 +91,7 @@ flowchart LR
 
 ## How It Works
 
-**1. ETL (`etl_pipeline.py`).** The raw logs are nested JSON. A customer's location and signup date sit inside a `profile` object, and each event keeps its details inside a `payload` object. The payload has different keys for purchases (`amount`, `payment_method`) and returns (`refund_amount`, `reason`). The pipeline:
-- flattens both files with `pd.json_normalize`
-- renames columns and converts timestamps to datetimes
-- removes duplicate IDs
-- fills the fields that don't apply to an event type (for example, a purchase has no refund)
-- checks for transactions with unknown customers and for negative amounts
-
-It then loads two tables into SQLite.
+**1. ETL (`etl_pipeline.py`).** The raw logs are nested JSON. A customer's city and signup date sit inside a `profile` object, and each event keeps its details inside a `payload` object. The pipeline flattens both with `pd.json_normalize` and then runs the cleaning steps in the table above. Each step prints how many rows it changed. The result is saved to SQLite and to CSV.
 
 **2. SQL analysis (`sql_analytics.sql`).** Four queries:
 - return rate by category, counting purchases and returns with `SUM(CASE WHEN ...)`
@@ -71,9 +99,9 @@ It then loads two tables into SQLite.
 - return reasons in each category, which is where the size issue shows up
 - the top 10 customers by items returned
 
-**3. Charts and savings.** The notebook (`data_analysis.ipynb`) runs the queries and plots the return-rate chart. `cost_analysis.py` models the savings scenarios above.
+**3. Savings (`cost_analysis.py`).** Works out the savings scenarios above.
 
-**4. Automated reporting.** `return_summary.py` writes `return_summary.csv`, which is imported into a Google Sheet. `automation.gs` reads that sheet every morning at 9 AM and emails the table to the marketing and product teams. Any category with a return rate above 15% is highlighted and named in the subject line. The numbers come from the sheet, so the email is always current.
+**4. Automated reporting.** `return_summary.py` writes `return_summary.csv` and the return-rate chart. The CSV is imported into a Google Sheet. `automation.gs` reads that sheet every morning at 9 AM and emails the table to the marketing and product teams. Any category with a return rate above 15% is highlighted and named in the subject line.
 
 ## Database Schema
 
@@ -82,11 +110,11 @@ It then loads two tables into SQLite.
 | Column | Type | Description |
 |---|---|---|
 | `customer_id` | TEXT | `U00001` to `U02000` |
-| `location` | TEXT | Mumbai, Delhi, Bangalore, Hyderabad, Pune |
+| `location` | TEXT | Mumbai, Delhi, Bangalore, Hyderabad, Pune, or Unknown |
 | `signup_date` | DATETIME | Registration date |
 | `status` | TEXT | Account status |
 
-**transactions** (8,905 rows: 8,000 purchases, 905 returns)
+**transactions** (8,905 rows)
 
 | Column | Type | Description |
 |---|---|---|
@@ -96,21 +124,20 @@ It then loads two tables into SQLite.
 | `customer_id` | TEXT | Links to `customers` |
 | `product_category` | TEXT | Apparel, Electronics, Home, Beauty |
 | `amount` | REAL | Purchase amount in INR (0 for returns) |
-| `payment_method` | TEXT | UPI, Credit Card, Debit Card |
+| `payment_method` | TEXT | UPI, Credit Card, Debit Card, Unknown (N/A for returns) |
 | `refund_amount` | REAL | Refund in INR (0 for purchases) |
-| `reason` | TEXT | Size Issue, Defective, Changed Mind |
+| `reason` | TEXT | Size Issue, Defective, Changed Mind (No Return for purchases) |
 
 ## Project Structure
 
 ```
 ├── raw_data/
-│   ├── raw_users.json        # 2,000 customer records
-│   └── raw_events.json       # 8,905 purchase and return events
+│   ├── raw_users.json        # 2,030 raw customer records
+│   └── raw_events.json       # 9,137 raw purchase and return events
 ├── images/
 │   └── return_rate_by_category.png
-├── etl_pipeline.py           # JSON -> cleaned tables -> SQLite
-├── sql_analytics.sql         # return rate, refund, reason and top returner queries
-├── data_analysis.ipynb       # analysis notebook with charts
+├── etl_pipeline.py           # cleaning + load into SQLite
+├── sql_analytics.sql         # analysis queries
 ├── cost_analysis.py          # savings scenarios
 ├── return_summary.py         # summary CSV for the Google Sheet + chart
 ├── automation.gs             # daily email (Google Apps Script)
@@ -125,13 +152,12 @@ git clone https://github.com/Saksham2410del/Ecommerce-returns-analytics.git
 cd Ecommerce-returns-analytics
 pip install -r requirements.txt
 
-python etl_pipeline.py        # builds ecommerce_data_warehouse.db
+python etl_pipeline.py        # cleans the data, builds ecommerce_data_warehouse.db
 python return_summary.py      # summary CSV + chart
 python cost_analysis.py       # savings scenarios
-jupyter notebook data_analysis.ipynb
 ```
 
-To run the SQL queries directly:
+To run the SQL queries, open `ecommerce_data_warehouse.db` in [DB Browser for SQLite](https://sqlitebrowser.org/) and paste them in, or use the command line:
 
 ```bash
 sqlite3 ecommerce_data_warehouse.db < sql_analytics.sql

@@ -1,3 +1,2 @@
-pandas
+pandas>=2.0
 matplotlib
-jupyter

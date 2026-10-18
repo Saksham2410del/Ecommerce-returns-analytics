@@ -8,7 +8,7 @@
 ---
 
 ## 1. Executive Summary
-We analyzed a simulated dataset of **10,900+ raw JSON transaction records**, covering **2,000 customer profiles** and **8,905 orders and returns** stored in a SQLite relational database (`customers` and `transactions` tables).
+We analyzed a simulated dataset of **11,167 raw JSON records**. After removing duplicates, test accounts and incomplete rows and fixing inconsistent values, this left **2,000 customer profiles** and **8,905 orders and returns**, stored in a SQLite database (`customers` and `transactions` tables).
 
 **Key Finding:** Return rates are heavily skewed toward a single category. While Electronics, Home, and Beauty maintain healthy baseline return rates around ~5%, **Apparel has an abnormal return rate of 31.7%**.
 
